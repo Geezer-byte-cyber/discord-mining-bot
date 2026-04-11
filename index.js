@@ -60,6 +60,16 @@ const menuCategories = [
   }
 ];
 
+// ---- STOCK STORAGE ----
+// Stores { itemName: amountNeeded } e.g. { "Iron Ore": "500" }
+const stockNeeded = {};
+
+// All material names for the slash command choices
+const materialItems = [
+  "Iron Ore", "Coal Ore", "Aluminium Ore",
+  "Iron Bar", "Coal Coke", "Steel Bar", "Aluminium Bar"
+];
+
 // ---- REGISTER SLASH COMMANDS ----
 const commands = [
   new SlashCommandBuilder()
@@ -70,13 +80,32 @@ const commands = [
     .setDescription("View the price list"),
   new SlashCommandBuilder()
     .setName("knox")
-    .setDescription("Knox on top...5 times?")
+    .setDescription("Knox on top...5 times?"),
+  new SlashCommandBuilder()
+    .setName("stock")
+    .setDescription("View how much of each material is needed"),
+  new SlashCommandBuilder()
+    .setName("setstock")
+    .setDescription("Set the amount needed for a material (Admin only)")
+    .addStringOption(option =>
+      option.setName("item")
+        .setDescription("Which material?")
+        .setRequired(true)
+        .addChoices(
+          ...materialItems.map(item => ({ name: item, value: item }))
+        )
+    )
+    .addStringOption(option =>
+      option.setName("amount")
+        .setDescription("How much is needed?")
+        .setRequired(true)
+    )
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  const guildIds = ["1449801196893241455"];
+  const guildIds = ["1449801196893241455", "YOUR_FRIENDS_SERVER_ID_HERE"];
   for (const guildId of guildIds) {
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, guildId),
@@ -139,6 +168,49 @@ client.on("interactionCreate", async (interaction) => {
     // /knox command
     if (interaction.commandName === "knox") {
       await interaction.reply("Knox on top...5 times?");
+    }
+
+    // /stock command
+    if (interaction.commandName === "stock") {
+      const embed = new EmbedBuilder()
+        .setTitle("🧱 Materials Needed")
+        .setColor(0x3498db)
+        .setFooter({ text: "Set by admins using /setstock" })
+        .setTimestamp();
+
+      const itemList = materialItems.map(item => {
+        const needed = stockNeeded[item] ?? "Not set";
+        return `**${item}** — ${needed}`;
+      }).join("\n");
+
+      embed.addFields({ name: "Amount Needed per Item", value: itemList });
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // /setstock command
+    if (interaction.commandName === "setstock") {
+      // ---- Change "YOUR_ROLE_NAME" to your actual role name ----
+      const allowedRoleName = "PSC";
+
+      const hasRole = interaction.member.roles.cache.some(
+        role => role.name === allowedRoleName
+      );
+
+      if (!hasRole) {
+        return await interaction.reply({
+          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
+          flags: 64
+        });
+      }
+
+      const item = interaction.options.getString("item");
+      const amount = interaction.options.getString("amount");
+      stockNeeded[item] = amount;
+
+      await interaction.reply({
+        content: `✅ Updated! **${item}** now needs **${amount}**.`,
+        flags: 64
+      });
     }
   }
 
