@@ -11,7 +11,9 @@ const {
   EmbedBuilder
 } = require("discord.js");
 const { google } = require("googleapis");
+const fs = require("fs");
 require("dotenv").config();
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ---- GOOGLE AUTH ----
@@ -60,9 +62,31 @@ const menuCategories = [
   }
 ];
 
-// ---- STOCK STORAGE ----
-// Stores { itemName: amountNeeded } e.g. { "Iron Ore": "500" }
-const stockNeeded = {};
+// ---- STOCK PERSISTENCE ----
+const STOCK_FILE = "./stock.json";
+
+function loadStock() {
+  try {
+    if (fs.existsSync(STOCK_FILE)) {
+      const data = fs.readFileSync(STOCK_FILE, "utf8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Failed to load stock.json:", err);
+  }
+  return {};
+}
+
+function saveStock(stock) {
+  try {
+    fs.writeFileSync(STOCK_FILE, JSON.stringify(stock, null, 2), "utf8");
+  } catch (err) {
+    console.error("Failed to save stock.json:", err);
+  }
+}
+
+// Load stock from disk on startup
+const stockNeeded = loadStock();
 
 // All material names for the slash command choices
 const materialItems = [
@@ -99,7 +123,10 @@ const commands = [
       option.setName("amount")
         .setDescription("How much is needed?")
         .setRequired(true)
-    )
+    ),
+  new SlashCommandBuilder()
+    .setName("clearstock")
+    .setDescription("Clear the entire stock list (Admin only)")
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -189,7 +216,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /setstock command
     if (interaction.commandName === "setstock") {
-      // ---- Change "YOUR_ROLE_NAME" to your actual role name ----
       const allowedRoleName = "PSC";
 
       const hasRole = interaction.member.roles.cache.some(
@@ -205,10 +231,40 @@ client.on("interactionCreate", async (interaction) => {
 
       const item = interaction.options.getString("item");
       const amount = interaction.options.getString("amount");
+
+      // Update in memory and persist to disk
       stockNeeded[item] = amount;
+      saveStock(stockNeeded);
 
       await interaction.reply({
         content: `✅ Updated! **${item}** now needs **${amount}**.`,
+        flags: 64
+      });
+    }
+
+    // /clearstock command
+    if (interaction.commandName === "clearstock") {
+      const allowedRoleName = "PSC";
+
+      const hasRole = interaction.member.roles.cache.some(
+        role => role.name === allowedRoleName
+      );
+
+      if (!hasRole) {
+        return await interaction.reply({
+          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
+          flags: 64
+        });
+      }
+
+      // Clear all entries and save to disk
+      for (const key of Object.keys(stockNeeded)) {
+        delete stockNeeded[key];
+      }
+      saveStock(stockNeeded);
+
+      await interaction.reply({
+        content: "🗑️ Stock list has been cleared. All items are now set to **Not set**.",
         flags: 64
       });
     }
