@@ -17,10 +17,9 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // ---- GOOGLE AUTH ----
 const auth = new google.auth.GoogleAuth({
-  keyFile: "credentials.json",
+  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
-
 async function addToSheet(discordUser, name, item, amount) {
   const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
 
