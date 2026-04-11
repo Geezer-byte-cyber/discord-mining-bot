@@ -76,11 +76,13 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  const guildId = "1449801196893241455";
-  await rest.put(
-    Routes.applicationGuildCommands(client.user.id, guildId),
-    { body: commands }
-  );
+  const guildIds = ["1449801196893241455", "1430968926480629825"];
+  for (const guildId of guildIds) {
+    await rest.put(
+      Routes.applicationGuildCommands(client.user.id, guildId),
+      { body: commands }
+    );
+  }
   console.log("Slash commands registered.");
 });
 
