@@ -16,6 +16,18 @@ require("dotenv").config();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+// ---- ROLES ----
+const ADMIN_ROLES = ["PSC", "Crew Leader", "Underboss", "Boss"];
+const MEMBER_ROLE = "Knox";
+
+function hasAdminRole(member) {
+  return member.roles.cache.some(role => ADMIN_ROLES.includes(role.name));
+}
+
+function hasMemberRole(member) {
+  return member.roles.cache.some(role => role.name === MEMBER_ROLE);
+}
+
 // ---- GOOGLE AUTH ----
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
@@ -109,19 +121,15 @@ function saveTodo(list) {
 }
 
 // ---- FUZZY MATCH ----
-// Returns the closest material name to the input, or null if nothing is close enough
 function fuzzyMatchMaterial(input) {
   const normalised = input.toLowerCase().trim();
 
-  // First try an exact case-insensitive match
   const exact = materialItems.find(m => m.toLowerCase() === normalised);
   if (exact) return exact;
 
-  // Then try a "includes" match (e.g. "iron" matches "Iron Ore")
   const partial = materialItems.find(m => m.toLowerCase().includes(normalised) || normalised.includes(m.toLowerCase()));
   if (partial) return partial;
 
-  // Finally try matching every word in the input against the material names
   const inputWords = normalised.split(/\s+/);
   let bestMatch = null;
   let bestScore = 0;
@@ -209,7 +217,7 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  const guildIds = ["1449801196893241455", "1430968926480629825"];
+  const guildIds = ["1449801196893241455", "YOUR_FRIENDS_SERVER_ID_HERE"];
   for (const guildId of guildIds) {
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, guildId),
@@ -222,6 +230,30 @@ client.once("clientReady", async () => {
 // ---- INTERACTIONS ----
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
+
+    // Admin-only commands
+    const adminCommands = ["setstock", "clearstock", "addtodo", "removetodo", "cleartodo"];
+    // Member commands (require Knox role, but admins can also use them)
+    const memberCommands = ["mining", "menu", "knox", "stock", "todo"];
+
+    const isAdminCommand = adminCommands.includes(interaction.commandName);
+    const isMemberCommand = memberCommands.includes(interaction.commandName);
+
+    // Check admin commands
+    if (isAdminCommand && !hasAdminRole(interaction.member)) {
+      return await interaction.reply({
+        content: `❌ You need one of the following roles to use this command: **${ADMIN_ROLES.join(", ")}**.`,
+        flags: 64
+      });
+    }
+
+    // Check member commands — admins bypass this check
+    if (isMemberCommand && !hasMemberRole(interaction.member) && !hasAdminRole(interaction.member)) {
+      return await interaction.reply({
+        content: `❌ You need the **${MEMBER_ROLE}** role to use this command.`,
+        flags: 64
+      });
+    }
 
     // /mining command
     if (interaction.commandName === "mining") {
@@ -293,17 +325,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /setstock command
     if (interaction.commandName === "setstock") {
-      const allowedRoleName = "PSC";
-      const hasRole = interaction.member.roles.cache.some(
-        role => role.name === allowedRoleName
-      );
-      if (!hasRole) {
-        return await interaction.reply({
-          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
-          flags: 64
-        });
-      }
-
       const item = interaction.options.getString("item");
       const amount = interaction.options.getString("amount");
       stockNeeded[item] = amount;
@@ -317,17 +338,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /clearstock command
     if (interaction.commandName === "clearstock") {
-      const allowedRoleName = "PSC";
-      const hasRole = interaction.member.roles.cache.some(
-        role => role.name === allowedRoleName
-      );
-      if (!hasRole) {
-        return await interaction.reply({
-          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
-          flags: 64
-        });
-      }
-
       for (const key of Object.keys(stockNeeded)) {
         delete stockNeeded[key];
       }
@@ -361,17 +371,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /addtodo command
     if (interaction.commandName === "addtodo") {
-      const allowedRoleName = "PSC";
-      const hasRole = interaction.member.roles.cache.some(
-        role => role.name === allowedRoleName
-      );
-      if (!hasRole) {
-        return await interaction.reply({
-          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
-          flags: 64
-        });
-      }
-
       const task = interaction.options.getString("task");
       todoList.push(task);
       saveTodo(todoList);
@@ -384,17 +383,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /removetodo command
     if (interaction.commandName === "removetodo") {
-      const allowedRoleName = "PSC";
-      const hasRole = interaction.member.roles.cache.some(
-        role => role.name === allowedRoleName
-      );
-      if (!hasRole) {
-        return await interaction.reply({
-          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
-          flags: 64
-        });
-      }
-
       const number = interaction.options.getInteger("number");
       if (number < 1 || number > todoList.length) {
         return await interaction.reply({
@@ -414,17 +402,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // /cleartodo command
     if (interaction.commandName === "cleartodo") {
-      const allowedRoleName = "PSC";
-      const hasRole = interaction.member.roles.cache.some(
-        role => role.name === allowedRoleName
-      );
-      if (!hasRole) {
-        return await interaction.reply({
-          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
-          flags: 64
-        });
-      }
-
       todoList.length = 0;
       saveTodo(todoList);
 
@@ -435,9 +412,17 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Modal submission
+  // Modal submission — also requires Knox role (or admin)
   if (interaction.isModalSubmit()) {
     if (interaction.customId === "miningForm") {
+
+      if (!hasMemberRole(interaction.member) && !hasAdminRole(interaction.member)) {
+        return await interaction.reply({
+          content: `❌ You need the **${MEMBER_ROLE}** role to submit this form.`,
+          flags: 64
+        });
+      }
+
       const name = interaction.fields.getTextInputValue("name");
       const item = interaction.fields.getTextInputValue("item");
       const amount = interaction.fields.getTextInputValue("amount");
@@ -461,7 +446,6 @@ client.on("interactionCreate", async (interaction) => {
               stockNeeded[matchedMaterial] = String(newAmount);
               saveStock(stockNeeded);
 
-              // Warn if the item name was fuzzy matched (not what they typed exactly)
               const wasGuessed = matchedMaterial.toLowerCase() !== item.toLowerCase().trim();
               const matchNote = wasGuessed ? ` *(matched to **${matchedMaterial}**)*` : "";
               stockMessage = `\n📦 Stock updated: **${matchedMaterial}**${matchNote} — ${currentAmount} → **${newAmount}** remaining`;
@@ -471,9 +455,7 @@ client.on("interactionCreate", async (interaction) => {
               }
             }
           }
-          // If stock for that material hasn't been set, silently skip
         }
-        // If no match found, silently skip stock update
 
         await interaction.reply({
           content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${item}\n**Amount:** ${amount}${stockMessage}`,
