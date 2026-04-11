@@ -8,7 +8,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
-  EmbedBuilder  // ← added
+  EmbedBuilder
 } = require("discord.js");
 const { google } = require("googleapis");
 require("dotenv").config();
@@ -65,9 +65,12 @@ const commands = [
   new SlashCommandBuilder()
     .setName("mining")
     .setDescription("Submit your mining completion"),
-  new SlashCommandBuilder()       // ← added
+  new SlashCommandBuilder()
     .setName("menu")
-    .setDescription("View the price list")
+    .setDescription("View the price list"),
+  new SlashCommandBuilder()
+    .setName("knox")
+    .setDescription("Knox on top...5 times?")
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -113,7 +116,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    // /menu command ← added
+    // /menu command
     if (interaction.commandName === "menu") {
       const embed = new EmbedBuilder()
         .setTitle("📋 Price List")
@@ -130,6 +133,11 @@ client.on("interactionCreate", async (interaction) => {
 
       await interaction.reply({ embeds: [embed] });
     }
+
+    // /knox command
+    if (interaction.commandName === "knox") {
+      await interaction.reply("Knox on top...5 times?");
+    }
   }
 
   // Modal submission
@@ -142,7 +150,7 @@ client.on("interactionCreate", async (interaction) => {
         await addToSheet(interaction.user.tag, name, item, amount);
         await interaction.reply({
           content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${item}\n**Amount:** ${amount}`,
-          flags: 64  // ← also fixed the ephemeral deprecation warning you were getting
+          flags: 64
         });
       } catch (err) {
         console.error(err);
