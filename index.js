@@ -63,12 +63,12 @@ const menuCategories = [
   {
     name: "🧱 Materials per box",
     items: [
-      { name: "Iron Ore", price: "8.7k" },
-      { name: "Coal Ore", price: "7.5k" },
+      { name: "Iron Ore", price: "16k" },
+      { name: "Coal Ore", price: "7k" },
       { name: "Aluminium Ore", price: "8.7k" },
-      { name: "Iron Bar", price: "19.3k" },
-      { name: "Coal Coke", price: "12.5k" },
-      { name: "Steel Bar", price: "21.2k" },
+      { name: "Iron Bar", price: "19k" },
+      { name: "Coal Coke", price: "12k" },
+      { name: "Steel Bar", price: "21k" },
       { name: "Aluminium Bar", price: "19.3k" },
     ]
   }
