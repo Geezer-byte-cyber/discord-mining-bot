@@ -85,8 +85,63 @@ function saveStock(stock) {
   }
 }
 
-// Load stock from disk on startup
+// ---- TODO PERSISTENCE ----
+const TODO_FILE = "./todo.json";
+
+function loadTodo() {
+  try {
+    if (fs.existsSync(TODO_FILE)) {
+      const data = fs.readFileSync(TODO_FILE, "utf8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Failed to load todo.json:", err);
+  }
+  return [];
+}
+
+function saveTodo(list) {
+  try {
+    fs.writeFileSync(TODO_FILE, JSON.stringify(list, null, 2), "utf8");
+  } catch (err) {
+    console.error("Failed to save todo.json:", err);
+  }
+}
+
+// ---- FUZZY MATCH ----
+// Returns the closest material name to the input, or null if nothing is close enough
+function fuzzyMatchMaterial(input) {
+  const normalised = input.toLowerCase().trim();
+
+  // First try an exact case-insensitive match
+  const exact = materialItems.find(m => m.toLowerCase() === normalised);
+  if (exact) return exact;
+
+  // Then try a "includes" match (e.g. "iron" matches "Iron Ore")
+  const partial = materialItems.find(m => m.toLowerCase().includes(normalised) || normalised.includes(m.toLowerCase()));
+  if (partial) return partial;
+
+  // Finally try matching every word in the input against the material names
+  const inputWords = normalised.split(/\s+/);
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const material of materialItems) {
+    const materialWords = material.toLowerCase().split(/\s+/);
+    const commonWords = inputWords.filter(w => materialWords.includes(w));
+    const score = commonWords.length / Math.max(inputWords.length, materialWords.length);
+    if (score > bestScore && score >= 0.5) {
+      bestScore = score;
+      bestMatch = material;
+    }
+  }
+
+  return bestMatch;
+}
+
+// Load from disk on startup
 const stockNeeded = loadStock();
+const todoList = loadTodo();
 
 // All material names for the slash command choices
 const materialItems = [
@@ -126,13 +181,35 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName("clearstock")
-    .setDescription("Clear the entire stock list (Admin only)")
+    .setDescription("Clear the entire stock list (Admin only)"),
+  new SlashCommandBuilder()
+    .setName("todo")
+    .setDescription("View the current to-do list"),
+  new SlashCommandBuilder()
+    .setName("addtodo")
+    .setDescription("Add a task to the to-do list (Admin only)")
+    .addStringOption(option =>
+      option.setName("task")
+        .setDescription("What needs doing?")
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName("removetodo")
+    .setDescription("Remove a task from the to-do list by its number (Admin only)")
+    .addIntegerOption(option =>
+      option.setName("number")
+        .setDescription("Which task number to remove? (use /todo to see numbers)")
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName("cleartodo")
+    .setDescription("Clear the entire to-do list (Admin only)")
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  const guildIds = ["1449801196893241455"];
+  const guildIds = ["1449801196893241455", "YOUR_FRIENDS_SERVER_ID_HERE"];
   for (const guildId of guildIds) {
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, guildId),
@@ -217,11 +294,9 @@ client.on("interactionCreate", async (interaction) => {
     // /setstock command
     if (interaction.commandName === "setstock") {
       const allowedRoleName = "PSC";
-
       const hasRole = interaction.member.roles.cache.some(
         role => role.name === allowedRoleName
       );
-
       if (!hasRole) {
         return await interaction.reply({
           content: `❌ You need the **${allowedRoleName}** role to use this command.`,
@@ -231,8 +306,6 @@ client.on("interactionCreate", async (interaction) => {
 
       const item = interaction.options.getString("item");
       const amount = interaction.options.getString("amount");
-
-      // Update in memory and persist to disk
       stockNeeded[item] = amount;
       saveStock(stockNeeded);
 
@@ -245,11 +318,9 @@ client.on("interactionCreate", async (interaction) => {
     // /clearstock command
     if (interaction.commandName === "clearstock") {
       const allowedRoleName = "PSC";
-
       const hasRole = interaction.member.roles.cache.some(
         role => role.name === allowedRoleName
       );
-
       if (!hasRole) {
         return await interaction.reply({
           content: `❌ You need the **${allowedRoleName}** role to use this command.`,
@@ -257,7 +328,6 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      // Clear all entries and save to disk
       for (const key of Object.keys(stockNeeded)) {
         delete stockNeeded[key];
       }
@@ -265,6 +335,101 @@ client.on("interactionCreate", async (interaction) => {
 
       await interaction.reply({
         content: "🗑️ Stock list has been cleared. All items are now set to **Not set**.",
+        flags: 64
+      });
+    }
+
+    // /todo command
+    if (interaction.commandName === "todo") {
+      const embed = new EmbedBuilder()
+        .setTitle("✅ To-Do List")
+        .setColor(0x2ecc71)
+        .setFooter({ text: "Managed by admins using /addtodo and /removetodo" })
+        .setTimestamp();
+
+      if (todoList.length === 0) {
+        embed.setDescription("Nothing to do — the list is empty!");
+      } else {
+        const taskList = todoList
+          .map((task, index) => `**${index + 1}.** ${task}`)
+          .join("\n");
+        embed.setDescription(taskList);
+      }
+
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // /addtodo command
+    if (interaction.commandName === "addtodo") {
+      const allowedRoleName = "PSC";
+      const hasRole = interaction.member.roles.cache.some(
+        role => role.name === allowedRoleName
+      );
+      if (!hasRole) {
+        return await interaction.reply({
+          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
+          flags: 64
+        });
+      }
+
+      const task = interaction.options.getString("task");
+      todoList.push(task);
+      saveTodo(todoList);
+
+      await interaction.reply({
+        content: `✅ Added to the to-do list: **${task}**`,
+        flags: 64
+      });
+    }
+
+    // /removetodo command
+    if (interaction.commandName === "removetodo") {
+      const allowedRoleName = "PSC";
+      const hasRole = interaction.member.roles.cache.some(
+        role => role.name === allowedRoleName
+      );
+      if (!hasRole) {
+        return await interaction.reply({
+          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
+          flags: 64
+        });
+      }
+
+      const number = interaction.options.getInteger("number");
+      if (number < 1 || number > todoList.length) {
+        return await interaction.reply({
+          content: `❌ Invalid task number. Use **/todo** to see the current list.`,
+          flags: 64
+        });
+      }
+
+      const removed = todoList.splice(number - 1, 1)[0];
+      saveTodo(todoList);
+
+      await interaction.reply({
+        content: `🗑️ Removed task **${number}**: **${removed}**`,
+        flags: 64
+      });
+    }
+
+    // /cleartodo command
+    if (interaction.commandName === "cleartodo") {
+      const allowedRoleName = "PSC";
+      const hasRole = interaction.member.roles.cache.some(
+        role => role.name === allowedRoleName
+      );
+      if (!hasRole) {
+        return await interaction.reply({
+          content: `❌ You need the **${allowedRoleName}** role to use this command.`,
+          flags: 64
+        });
+      }
+
+      todoList.length = 0;
+      saveTodo(todoList);
+
+      await interaction.reply({
+        content: "🗑️ To-do list has been cleared.",
         flags: 64
       });
     }
@@ -276,10 +441,42 @@ client.on("interactionCreate", async (interaction) => {
       const name = interaction.fields.getTextInputValue("name");
       const item = interaction.fields.getTextInputValue("item");
       const amount = interaction.fields.getTextInputValue("amount");
+
       try {
         await addToSheet(interaction.user.tag, name, item, amount);
+
+        // ---- STOCK DEDUCTION ----
+        let stockMessage = "";
+        const submittedAmount = parseInt(amount, 10);
+        const matchedMaterial = fuzzyMatchMaterial(item);
+
+        if (matchedMaterial && !isNaN(submittedAmount)) {
+          const currentStock = stockNeeded[matchedMaterial];
+
+          if (currentStock !== undefined) {
+            const currentAmount = parseInt(currentStock, 10);
+
+            if (!isNaN(currentAmount)) {
+              const newAmount = Math.max(0, currentAmount - submittedAmount);
+              stockNeeded[matchedMaterial] = String(newAmount);
+              saveStock(stockNeeded);
+
+              // Warn if the item name was fuzzy matched (not what they typed exactly)
+              const wasGuessed = matchedMaterial.toLowerCase() !== item.toLowerCase().trim();
+              const matchNote = wasGuessed ? ` *(matched to **${matchedMaterial}**)*` : "";
+              stockMessage = `\n📦 Stock updated: **${matchedMaterial}**${matchNote} — ${currentAmount} → **${newAmount}** remaining`;
+
+              if (newAmount === 0) {
+                stockMessage += "\n✅ **Stock fully filled for this item!**";
+              }
+            }
+          }
+          // If stock for that material hasn't been set, silently skip
+        }
+        // If no match found, silently skip stock update
+
         await interaction.reply({
-          content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${item}\n**Amount:** ${amount}`,
+          content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${item}\n**Amount:** ${amount}${stockMessage}`,
           flags: 64
         });
       } catch (err) {
