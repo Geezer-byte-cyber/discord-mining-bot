@@ -237,15 +237,12 @@ client.once("clientReady", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
 
-    // Admin-only commands
     const adminCommands = ["setstock", "clearstock", "addtodo", "removetodo", "cleartodo"];
-    // Member commands (require Knox role, but admins can also use them)
     const memberCommands = ["mining", "menu", "knox", "stock", "todo"];
 
     const isAdminCommand = adminCommands.includes(interaction.commandName);
     const isMemberCommand = memberCommands.includes(interaction.commandName);
 
-    // Check admin commands
     if (isAdminCommand && !hasAdminRole(interaction.member)) {
       return await interaction.reply({
         content: `❌ You need one of the following roles to use this command: **${ADMIN_ROLES.join(", ")}**.`,
@@ -253,7 +250,6 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Check member commands — admins bypass this check
     if (isMemberCommand && !hasMemberRole(interaction.member) && !hasAdminRole(interaction.member)) {
       return await interaction.reply({
         content: `❌ You need the **${MEMBER_ROLE}** role to use this command.`,
@@ -490,6 +486,18 @@ client.on("messageCreate", (message) => {
 
   if (content === "!barry") {
     message.reply("Barry Island is the home of Knox Underboss, Tony Meakin");
+  }
+
+  if (content === "!67") {
+    message.reply("676767676767676767676767676767676767676767676767");
+  }
+
+  if (content === "!idk") {
+    message.reply("You should refer yourself to finding out in Roleplay");
+  }
+
+  if (content === "!wales") {
+    message.reply("Sheep sheep sheep sheep sheep");
   }
 });
 
