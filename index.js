@@ -14,7 +14,13 @@ const { google } = require("googleapis");
 const fs = require("fs");
 require("dotenv").config();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
 
 // ---- ROLES ----
 const ADMIN_ROLES = ["PSC", "Crew Leader", "Underboss", "Boss"];
@@ -469,6 +475,21 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
     }
+  }
+});
+
+// ---- PREFIX COMMANDS (! commands, open to everyone) ----
+client.on("messageCreate", (message) => {
+  if (message.author.bot) return;
+
+  const content = message.content.trim().toLowerCase();
+
+  if (content === "!slav") {
+    message.reply("A high usage of X-Ray goggles has been reported.");
+  }
+
+  if (content === "!barry") {
+    message.reply("Barry Island is the home of Knox Underboss, Tony Meakin");
   }
 });
 
