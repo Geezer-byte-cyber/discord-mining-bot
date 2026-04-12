@@ -1,3 +1,5 @@
 .env
 credentials.json
+stock.json
+todo.json
 node_modules
