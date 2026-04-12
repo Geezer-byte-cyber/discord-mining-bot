@@ -499,6 +499,10 @@ client.on("messageCreate", (message) => {
   if (content === "!wales") {
     message.reply("Sheep sheep sheep sheep sheep");
   }
+
+  if (content === "!jellyhead") {
+    message.reply("A Jellyhead is a term popularised by Mr Tony, no one really knows what it means but we all get it");
+  }
 });
 
 client.login(process.env.TOKEN);
