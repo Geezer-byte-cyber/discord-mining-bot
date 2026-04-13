@@ -552,6 +552,10 @@ client.on("messageCreate", (message) => {
     message.reply("A Jellyhead is a term popularised by Mr Tony, no one really knows what it means but we all get it");
   }
 
+if (content === "!clinton") {
+    message.reply("put on the map by Mr Freddie Loo");
+  }
+
   if (content === "!sam") {
     message.reply("Killed by rose faux for being bad at trivia");
   }
