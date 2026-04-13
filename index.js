@@ -11,7 +11,6 @@ const {
   EmbedBuilder
 } = require("discord.js");
 const { google } = require("googleapis");
-const fs = require("fs");
 require("dotenv").config();
 
 const client = new Client({
@@ -40,11 +39,11 @@ const auth = new google.auth.GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
 
-// ---- GOOGLE SHEETS HELPERS ----
 async function getSheetsClient() {
   return google.sheets({ version: "v4", auth: await auth.getClient() });
 }
 
+// ---- MINING SHEET ----
 async function addToSheet(discordUser, name, item, amount) {
   const sheets = await getSheetsClient();
   const timestamp = new Date().toISOString();
@@ -58,10 +57,7 @@ async function addToSheet(discordUser, name, item, amount) {
   });
 }
 
-// ---- STOCK PERSISTENCE (Google Sheets) ----
-// Uses a second sheet tab called "Stock" with two columns: Item | Amount
-// Row 1 is a header row: ["Item", "Amount"]
-
+// ---- STOCK PERSISTENCE (Google Sheets "Stock" tab) ----
 async function loadStockFromSheet() {
   try {
     const sheets = await getSheetsClient();
@@ -73,7 +69,6 @@ async function loadStockFromSheet() {
     const rows = res.data.values || [];
     const stock = {};
 
-    // Skip header row (index 0)
     for (let i = 1; i < rows.length; i++) {
       const [item, amount] = rows[i];
       if (item) stock[item] = amount ?? "Not set";
@@ -90,13 +85,11 @@ async function saveStockToSheet(stock) {
   try {
     const sheets = await getSheetsClient();
 
-    // Build rows: header + one row per material (always write all items in order)
     const rows = [["Item", "Amount"]];
     for (const item of materialItems) {
       rows.push([item, stock[item] ?? "Not set"]);
     }
 
-    // Clear the Stock sheet then rewrite it cleanly
     await sheets.spreadsheets.values.clear({
       spreadsheetId: process.env.SHEET_ID,
       range: "Stock!A:B"
@@ -110,6 +103,46 @@ async function saveStockToSheet(stock) {
     });
   } catch (err) {
     console.error("Failed to save stock to sheet:", err);
+  }
+}
+
+// ---- TODO PERSISTENCE (Google Sheets "Todo" tab) ----
+async function loadTodoFromSheet() {
+  try {
+    const sheets = await getSheetsClient();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Todo!A:A"
+    });
+
+    const rows = res.data.values || [];
+    // Skip header row, return just the task strings
+    return rows.slice(1).map(row => row[0]).filter(Boolean);
+  } catch (err) {
+    console.error("Failed to load todo from sheet:", err);
+    return [];
+  }
+}
+
+async function saveTodoToSheet(list) {
+  try {
+    const sheets = await getSheetsClient();
+
+    const rows = [["Task"], ...list.map(task => [task])];
+
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Todo!A:A"
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Todo!A1",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: rows }
+    });
+  } catch (err) {
+    console.error("Failed to save todo to sheet:", err);
   }
 }
 
@@ -141,29 +174,6 @@ const menuCategories = [
   }
 ];
 
-// ---- TODO PERSISTENCE ----
-const TODO_FILE = "./todo.json";
-
-function loadTodo() {
-  try {
-    if (fs.existsSync(TODO_FILE)) {
-      const data = fs.readFileSync(TODO_FILE, "utf8");
-      return JSON.parse(data);
-    }
-  } catch (err) {
-    console.error("Failed to load todo.json:", err);
-  }
-  return [];
-}
-
-function saveTodo(list) {
-  try {
-    fs.writeFileSync(TODO_FILE, JSON.stringify(list, null, 2), "utf8");
-  } catch (err) {
-    console.error("Failed to save todo.json:", err);
-  }
-}
-
 // ---- FUZZY MATCH ----
 function fuzzyMatchMaterial(input) {
   const normalised = input.toLowerCase().trim();
@@ -191,15 +201,15 @@ function fuzzyMatchMaterial(input) {
   return bestMatch;
 }
 
-// All material names
+// ---- MATERIAL ITEMS ----
 const materialItems = [
   "Iron Ore", "Coal Ore", "Aluminium Ore",
   "Iron Bar", "Coal Coke", "Steel Bar", "Aluminium Bar"
 ];
 
-// In-memory stock cache — loaded from Sheets on startup
+// In-memory caches — loaded from Sheets on startup
 let stockNeeded = {};
-const todoList = loadTodo();
+let todoList = [];
 
 // ---- REGISTER SLASH COMMANDS ----
 const commands = [
@@ -263,9 +273,12 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Load stock from Google Sheets on startup
+  // Load both stock and todo from Google Sheets on startup
   stockNeeded = await loadStockFromSheet();
   console.log("Stock loaded from Google Sheets:", stockNeeded);
+
+  todoList = await loadTodoFromSheet();
+  console.log("Todo loaded from Google Sheets:", todoList);
 
   const guildIds = ["1449801196893241455", "1430968926480629825"];
   for (const guildId of guildIds) {
@@ -419,7 +432,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.commandName === "addtodo") {
       const task = interaction.options.getString("task");
       todoList.push(task);
-      saveTodo(todoList);
+      await saveTodoToSheet(todoList);
 
       await interaction.reply({
         content: `✅ Added to the to-do list: **${task}**`,
@@ -438,7 +451,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const removed = todoList.splice(number - 1, 1)[0];
-      saveTodo(todoList);
+      await saveTodoToSheet(todoList);
 
       await interaction.reply({
         content: `🗑️ Removed task **${number}**: **${removed}**`,
@@ -449,7 +462,7 @@ client.on("interactionCreate", async (interaction) => {
     // /cleartodo command
     if (interaction.commandName === "cleartodo") {
       todoList.length = 0;
-      saveTodo(todoList);
+      await saveTodoToSheet(todoList);
 
       await interaction.reply({
         content: "🗑️ To-do list has been cleared.",
@@ -552,12 +565,12 @@ client.on("messageCreate", (message) => {
     message.reply("A Jellyhead is a term popularised by Mr Tony, no one really knows what it means but we all get it");
   }
 
-if (content === "!clinton") {
-    message.reply("put on the map by Mr Freddie Loo");
-  }
-
   if (content === "!sam") {
     message.reply("Killed by rose faux for being bad at trivia");
+  }
+
+  if (content === "!clinton") {
+    message.reply("put on the map by Mr Freddie Loo");
   }
 });
 
