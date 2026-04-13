@@ -503,6 +503,10 @@ client.on("messageCreate", (message) => {
   if (content === "!jellyhead") {
     message.reply("A Jellyhead is a term popularised by Mr Tony, no one really knows what it means but we all get it");
   }
+
+  if (content === "!sam") {
+    message.reply("Killed by rose faux for being bad at trivia");
+  }
 });
 
 client.login(process.env.TOKEN);
