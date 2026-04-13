@@ -39,8 +39,14 @@ const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
+
+// ---- GOOGLE SHEETS HELPERS ----
+async function getSheetsClient() {
+  return google.sheets({ version: "v4", auth: await auth.getClient() });
+}
+
 async function addToSheet(discordUser, name, item, amount) {
-  const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
+  const sheets = await getSheetsClient();
   const timestamp = new Date().toISOString();
   await sheets.spreadsheets.values.append({
     spreadsheetId: process.env.SHEET_ID,
@@ -52,7 +58,62 @@ async function addToSheet(discordUser, name, item, amount) {
   });
 }
 
-// ---- MENU DATA ---- 
+// ---- STOCK PERSISTENCE (Google Sheets) ----
+// Uses a second sheet tab called "Stock" with two columns: Item | Amount
+// Row 1 is a header row: ["Item", "Amount"]
+
+async function loadStockFromSheet() {
+  try {
+    const sheets = await getSheetsClient();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Stock!A:B"
+    });
+
+    const rows = res.data.values || [];
+    const stock = {};
+
+    // Skip header row (index 0)
+    for (let i = 1; i < rows.length; i++) {
+      const [item, amount] = rows[i];
+      if (item) stock[item] = amount ?? "Not set";
+    }
+
+    return stock;
+  } catch (err) {
+    console.error("Failed to load stock from sheet:", err);
+    return {};
+  }
+}
+
+async function saveStockToSheet(stock) {
+  try {
+    const sheets = await getSheetsClient();
+
+    // Build rows: header + one row per material (always write all items in order)
+    const rows = [["Item", "Amount"]];
+    for (const item of materialItems) {
+      rows.push([item, stock[item] ?? "Not set"]);
+    }
+
+    // Clear the Stock sheet then rewrite it cleanly
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Stock!A:B"
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.SHEET_ID,
+      range: "Stock!A1",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: rows }
+    });
+  } catch (err) {
+    console.error("Failed to save stock to sheet:", err);
+  }
+}
+
+// ---- MENU DATA ----
 const menuCategories = [
   {
     name: "💎 Per 1,000",
@@ -79,29 +140,6 @@ const menuCategories = [
     ]
   }
 ];
-
-// ---- STOCK PERSISTENCE ----
-const STOCK_FILE = "./stock.json";
-
-function loadStock() {
-  try {
-    if (fs.existsSync(STOCK_FILE)) {
-      const data = fs.readFileSync(STOCK_FILE, "utf8");
-      return JSON.parse(data);
-    }
-  } catch (err) {
-    console.error("Failed to load stock.json:", err);
-  }
-  return {};
-}
-
-function saveStock(stock) {
-  try {
-    fs.writeFileSync(STOCK_FILE, JSON.stringify(stock, null, 2), "utf8");
-  } catch (err) {
-    console.error("Failed to save stock.json:", err);
-  }
-}
 
 // ---- TODO PERSISTENCE ----
 const TODO_FILE = "./todo.json";
@@ -153,15 +191,15 @@ function fuzzyMatchMaterial(input) {
   return bestMatch;
 }
 
-// Load from disk on startup
-const stockNeeded = loadStock();
-const todoList = loadTodo();
-
-// All material names for the slash command choices
+// All material names
 const materialItems = [
   "Iron Ore", "Coal Ore", "Aluminium Ore",
   "Iron Bar", "Coal Coke", "Steel Bar", "Aluminium Bar"
 ];
+
+// In-memory stock cache — loaded from Sheets on startup
+let stockNeeded = {};
+const todoList = loadTodo();
 
 // ---- REGISTER SLASH COMMANDS ----
 const commands = [
@@ -221,8 +259,14 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  // Load stock from Google Sheets on startup
+  stockNeeded = await loadStockFromSheet();
+  console.log("Stock loaded from Google Sheets:", stockNeeded);
+
   const guildIds = ["1449801196893241455", "1430968926480629825"];
   for (const guildId of guildIds) {
     await rest.put(
@@ -330,7 +374,7 @@ client.on("interactionCreate", async (interaction) => {
       const item = interaction.options.getString("item");
       const amount = interaction.options.getString("amount");
       stockNeeded[item] = amount;
-      saveStock(stockNeeded);
+      await saveStockToSheet(stockNeeded);
 
       await interaction.reply({
         content: `✅ Updated! **${item}** now needs **${amount}**.`,
@@ -343,7 +387,7 @@ client.on("interactionCreate", async (interaction) => {
       for (const key of Object.keys(stockNeeded)) {
         delete stockNeeded[key];
       }
-      saveStock(stockNeeded);
+      await saveStockToSheet(stockNeeded);
 
       await interaction.reply({
         content: "🗑️ Stock list has been cleared. All items are now set to **Not set**.",
@@ -446,7 +490,7 @@ client.on("interactionCreate", async (interaction) => {
             if (!isNaN(currentAmount)) {
               const newAmount = Math.max(0, currentAmount - submittedAmount);
               stockNeeded[matchedMaterial] = String(newAmount);
-              saveStock(stockNeeded);
+              await saveStockToSheet(stockNeeded);
 
               const wasGuessed = matchedMaterial.toLowerCase() !== item.toLowerCase().trim();
               const matchNote = wasGuessed ? ` *(matched to **${matchedMaterial}**)*` : "";
@@ -498,6 +542,10 @@ client.on("messageCreate", (message) => {
 
   if (content === "!wales") {
     message.reply("Sheep sheep sheep sheep sheep");
+  }
+
+  if (content === "!wartime") {
+    message.reply("See you on the forums, WARRIOR");
   }
 
   if (content === "!jellyhead") {
