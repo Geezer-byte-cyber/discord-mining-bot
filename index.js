@@ -541,6 +541,10 @@ client.on("messageCreate", (message) => {
     message.reply("A high usage of X-Ray goggles has been reported.");
   }
 
+    if (content === "!jackwhite") {
+    message.reply("Jack White AKA Tony Meakins Lover.");
+  }
+
   if (content === "!barry") {
     message.reply("Barry Island is the home of Knox Underboss, Tony Meakin");
   }
