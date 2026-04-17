@@ -28,11 +28,15 @@ const ADMIN_ROLES = ["PSC", "Crew Leader", "Underboss", "Boss"];
 const MEMBER_ROLE = "Knox";
 
 function hasAdminRole(member) {
-  return member.roles.cache.some(role => ADMIN_ROLES.includes(role.name));
+  return member.roles.cache.some(
+    role => ADMIN_ROLES.map(r => r.toLowerCase()).includes(role.name.toLowerCase())
+  );
 }
 
 function hasMemberRole(member) {
-  return member.roles.cache.some(role => role.name === MEMBER_ROLE);
+  return member.roles.cache.some(
+    role => role.name.toLowerCase() === MEMBER_ROLE.toLowerCase()
+  );
 }
 
 // ---- GOOGLE AUTH ----
@@ -273,6 +277,14 @@ client.on("interactionCreate", async (interaction) => {
     const isAdminCommand = adminCommands.includes(interaction.commandName);
     const isMemberCommand = memberCommands.includes(interaction.commandName);
 
+    // ---- DEBUG LOGS ----
+    console.log("Command:", interaction.commandName);
+    console.log("isAdminCommand:", isAdminCommand);
+    console.log("isMemberCommand:", isMemberCommand);
+    console.log("Roles:", interaction.member.roles.cache.map(r => r.name));
+    console.log("hasMemberRole:", hasMemberRole(interaction.member));
+    console.log("hasAdminRole:", hasAdminRole(interaction.member));
+
     if (isAdminCommand && !hasAdminRole(interaction.member)) {
       return await interaction.reply({
         content: `❌ You need one of the following roles to use this command: **${ADMIN_ROLES.join(", ")}**.`,
@@ -487,7 +499,6 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      // Extract the selected item from the custom ID
       const selectedItem = interaction.customId.split(":")[1];
       const name = interaction.fields.getTextInputValue("name");
       const amount = interaction.fields.getTextInputValue("amount");
