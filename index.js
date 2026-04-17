@@ -8,7 +8,9 @@ const {
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
-  EmbedBuilder
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder
 } = require("discord.js");
 const { google } = require("googleapis");
 require("dotenv").config();
@@ -116,7 +118,6 @@ async function loadTodoFromSheet() {
     });
 
     const rows = res.data.values || [];
-    // Skip header row, return just the task strings
     return rows.slice(1).map(row => row[0]).filter(Boolean);
   } catch (err) {
     console.error("Failed to load todo from sheet:", err);
@@ -173,33 +174,6 @@ const menuCategories = [
     ]
   }
 ];
-
-// ---- FUZZY MATCH ----
-function fuzzyMatchMaterial(input) {
-  const normalised = input.toLowerCase().trim();
-
-  const exact = materialItems.find(m => m.toLowerCase() === normalised);
-  if (exact) return exact;
-
-  const partial = materialItems.find(m => m.toLowerCase().includes(normalised) || normalised.includes(m.toLowerCase()));
-  if (partial) return partial;
-
-  const inputWords = normalised.split(/\s+/);
-  let bestMatch = null;
-  let bestScore = 0;
-
-  for (const material of materialItems) {
-    const materialWords = material.toLowerCase().split(/\s+/);
-    const commonWords = inputWords.filter(w => materialWords.includes(w));
-    const score = commonWords.length / Math.max(inputWords.length, materialWords.length);
-    if (score > bestScore && score >= 0.5) {
-      bestScore = score;
-      bestMatch = material;
-    }
-  }
-
-  return bestMatch;
-}
 
 // ---- MATERIAL ITEMS ----
 const materialItems = [
@@ -273,7 +247,6 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Load both stock and todo from Google Sheets on startup
   stockNeeded = await loadStockFromSheet();
   console.log("Stock loaded from Google Sheets:", stockNeeded);
 
@@ -314,32 +287,26 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // /mining command
+    // /mining command — show item select menu first
     if (interaction.commandName === "mining") {
-      const modal = new ModalBuilder()
-        .setCustomId("miningForm")
-        .setTitle("Mining Completion Form");
-      const nameInput = new TextInputBuilder()
-        .setCustomId("name")
-        .setLabel("What is your name?")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-      const itemInput = new TextInputBuilder()
-        .setCustomId("item")
-        .setLabel("What did you get?")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-      const amountInput = new TextInputBuilder()
-        .setCustomId("amount")
-        .setLabel("How much?")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(nameInput),
-        new ActionRowBuilder().addComponents(itemInput),
-        new ActionRowBuilder().addComponents(amountInput)
-      );
-      await interaction.showModal(modal);
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("miningItemSelect")
+        .setPlaceholder("Select what you mined...")
+        .addOptions(
+          materialItems.map(item =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(item)
+              .setValue(item)
+          )
+        );
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+
+      await interaction.reply({
+        content: "⛏️ **What did you mine?** Select an item below to continue:",
+        components: [row],
+        flags: 64
+      });
     }
 
     // /menu command
@@ -471,9 +438,47 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Modal submission — also requires Knox role (or admin)
+  // ---- SELECT MENU — item chosen, now show modal for name + amount ----
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === "miningItemSelect") {
+
+      if (!hasMemberRole(interaction.member) && !hasAdminRole(interaction.member)) {
+        return await interaction.reply({
+          content: `❌ You need the **${MEMBER_ROLE}** role to use this.`,
+          flags: 64
+        });
+      }
+
+      const selectedItem = interaction.values[0];
+
+      const modal = new ModalBuilder()
+        .setCustomId(`miningForm:${selectedItem}`)
+        .setTitle("Mining Completion Form");
+
+      const nameInput = new TextInputBuilder()
+        .setCustomId("name")
+        .setLabel("What is your name?")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const amountInput = new TextInputBuilder()
+        .setCustomId("amount")
+        .setLabel(`How much ${selectedItem} did you get?`)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(amountInput)
+      );
+
+      await interaction.showModal(modal);
+    }
+  }
+
+  // ---- MODAL SUBMIT ----
   if (interaction.isModalSubmit()) {
-    if (interaction.customId === "miningForm") {
+    if (interaction.customId.startsWith("miningForm:")) {
 
       if (!hasMemberRole(interaction.member) && !hasAdminRole(interaction.member)) {
         return await interaction.reply({
@@ -482,42 +487,38 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
+      // Extract the selected item from the custom ID
+      const selectedItem = interaction.customId.split(":")[1];
       const name = interaction.fields.getTextInputValue("name");
-      const item = interaction.fields.getTextInputValue("item");
       const amount = interaction.fields.getTextInputValue("amount");
 
       try {
-        await addToSheet(interaction.user.tag, name, item, amount);
+        await addToSheet(interaction.user.tag, name, selectedItem, amount);
 
         // ---- STOCK DEDUCTION ----
         let stockMessage = "";
         const submittedAmount = parseInt(amount, 10);
-        const matchedMaterial = fuzzyMatchMaterial(item);
 
-        if (matchedMaterial && !isNaN(submittedAmount)) {
-          const currentStock = stockNeeded[matchedMaterial];
+        if (!isNaN(submittedAmount)) {
+          const currentAmount = parseInt(stockNeeded[selectedItem], 10);
 
-          if (currentStock !== undefined) {
-            const currentAmount = parseInt(currentStock, 10);
+          if (!isNaN(currentAmount)) {
+            const newAmount = Math.max(0, currentAmount - submittedAmount);
+            stockNeeded[selectedItem] = String(newAmount);
+            await saveStockToSheet(stockNeeded);
 
-            if (!isNaN(currentAmount)) {
-              const newAmount = Math.max(0, currentAmount - submittedAmount);
-              stockNeeded[matchedMaterial] = String(newAmount);
-              await saveStockToSheet(stockNeeded);
+            stockMessage = `\n📦 Stock updated: **${selectedItem}** — ${currentAmount} → **${newAmount}** remaining`;
 
-              const wasGuessed = matchedMaterial.toLowerCase() !== item.toLowerCase().trim();
-              const matchNote = wasGuessed ? ` *(matched to **${matchedMaterial}**)*` : "";
-              stockMessage = `\n📦 Stock updated: **${matchedMaterial}**${matchNote} — ${currentAmount} → **${newAmount}** remaining`;
-
-              if (newAmount === 0) {
-                stockMessage += "\n✅ **Stock fully filled for this item!**";
-              }
+            if (newAmount === 0) {
+              stockMessage += "\n✅ **Stock fully filled for this item!**";
             }
+          } else {
+            stockMessage = `\n⚠️ No stock target set for **${selectedItem}** — nothing deducted.`;
           }
         }
 
         await interaction.reply({
-          content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${item}\n**Amount:** ${amount}${stockMessage}`,
+          content: `✅ Submitted!\n**Name:** ${name}\n**Item:** ${selectedItem}\n**Amount:** ${amount}${stockMessage}`,
           flags: 64
         });
       } catch (err) {
@@ -539,10 +540,6 @@ client.on("messageCreate", (message) => {
 
   if (content === "!slav") {
     message.reply("A high usage of X-Ray goggles has been reported.");
-  }
-
-    if (content === "!jackwhite") {
-    message.reply("Jack White AKA Tony Meakins Lover.");
   }
 
   if (content === "!barry") {
