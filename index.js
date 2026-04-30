@@ -13,6 +13,7 @@ const {
   StringSelectMenuOptionBuilder
 } = require("discord.js");
 const { google } = require("googleapis");
+const cron = require("node-cron");
 require("dotenv").config();
 
 const client = new Client({
@@ -189,6 +190,45 @@ const materialItems = [
 let stockNeeded = {};
 let todoList = [];
 
+// ---- DAILY DOG PICTURE ----
+// Set DOG_CHANNEL_ID in your .env file to the channel you want the dog pics posted in
+async function postDailyDog() {
+  try {
+    const channelId = process.env.DOG_CHANNEL_ID;
+    if (!channelId) {
+      console.warn("DOG_CHANNEL_ID not set in .env — skipping daily dog post.");
+      return;
+    }
+
+    const channel = await client.channels.fetch(channelId);
+    if (!channel) {
+      console.warn("Could not find the dog channel.");
+      return;
+    }
+
+    // Fetch a random dog image from the Dog CEO API (free, no key needed)
+    const res = await fetch("https://dog.ceo/api/breeds/image/random");
+    const data = await res.json();
+
+    if (data.status !== "success") {
+      console.error("Dog API returned non-success status:", data);
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🐶 Good morning! Here's your daily cute dog!")
+      .setImage(data.message)
+      .setColor(0xf5a623)
+      .setFooter({ text: "Have a great day! 🐾" })
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    console.log("Daily dog picture posted!");
+  } catch (err) {
+    console.error("Failed to post daily dog picture:", err);
+  }
+}
+
 // ---- REGISTER SLASH COMMANDS ----
 const commands = [
   new SlashCommandBuilder()
@@ -265,6 +305,16 @@ client.once("clientReady", async () => {
     );
   }
   console.log("Slash commands registered.");
+
+  // ---- SCHEDULE DAILY DOG AT 8:00 AM UK TIME ----
+  // Cron format: second(optional) minute hour day month weekday
+  // "Europe/London" automatically handles GMT/BST switching
+  cron.schedule("0 8 * * *", () => {
+    postDailyDog();
+  }, {
+    timezone: "Europe/London"
+  });
+  console.log("Daily dog scheduler started (8:00 AM UK time).");
 });
 
 // ---- INTERACTIONS ----
