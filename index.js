@@ -14,6 +14,7 @@ const {
 } = require("discord.js");
 const { google } = require("googleapis");
 const cron = require("node-cron");
+const https = require("https"); // Built-in Node.js — no install needed
 require("dotenv").config();
 
 const client = new Client({
@@ -190,8 +191,24 @@ const materialItems = [
 let stockNeeded = {};
 let todoList = [];
 
+// ---- HELPER: https GET (replaces fetch) ----
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = "";
+      res.on("data", chunk => { data += chunk; });
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error("Failed to parse JSON: " + e.message));
+        }
+      });
+    }).on("error", reject);
+  });
+}
+
 // ---- DAILY DOG PICTURE ----
-// Set DOG_CHANNEL_ID in your .env file to the channel you want the dog pics posted in
 async function postDailyDog() {
   try {
     const channelId = process.env.DOG_CHANNEL_ID;
@@ -206,9 +223,7 @@ async function postDailyDog() {
       return;
     }
 
-    // Fetch a random dog image from the Dog CEO API (free, no key needed)
-    const res = await fetch("https://dog.ceo/api/breeds/image/random");
-    const data = await res.json();
+    const data = await httpsGet("https://dog.ceo/api/breeds/image/random");
 
     if (data.status !== "success") {
       console.error("Dog API returned non-success status:", data);
@@ -307,8 +322,6 @@ client.once("clientReady", async () => {
   console.log("Slash commands registered.");
 
   // ---- SCHEDULE DAILY DOG AT 8:00 AM UK TIME ----
-  // Cron format: second(optional) minute hour day month weekday
-  // "Europe/London" automatically handles GMT/BST switching
   cron.schedule("0 8 * * *", () => {
     postDailyDog();
   }, {
@@ -633,6 +646,11 @@ client.on("messageCreate", (message) => {
 
   if (content === "!clinton") {
     message.reply("put on the map by Mr Freddie Loo");
+  }
+
+  // ---- TEST COMMAND: manually trigger the daily dog post ----
+  if (content === "!testdog") {
+    postDailyDog();
   }
 });
 
