@@ -312,7 +312,7 @@ client.once("clientReady", async () => {
   todoList = await loadTodoFromSheet();
   console.log("Todo loaded from Google Sheets:", todoList);
 
-  const guildIds = ["1449801196893241455", "1430968926480629825"];
+  const guildIds = ["1430968926480629825"];
   for (const guildId of guildIds) {
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, guildId),
